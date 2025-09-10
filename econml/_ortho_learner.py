@@ -1148,13 +1148,12 @@ class _OrthoLearner(TreatmentExpansionMixin, LinearCateEstimator):
         # If using an _rlearner, the scoring parameter can be passed along, if provided
         if scoring is not None:
             # Cannot import in header, or circular imports
-            from .dml._rlearner import _ModelFinal as _DMLModelFinal
-            from .dr._drlearner import _ModelFinal as _DRModelFinal
-            if isinstance(self._ortho_learner_model_final, (_DMLModelFinal, _DRModelFinal)):
+            from .dml._rlearner import _ModelFinal
+            if isinstance(self._ortho_learner_model_final, _ModelFinal):
                 score_kwargs['scoring'] = scoring
             else:
                 raise NotImplementedError("scoring parameter only implemented for "
-                                          "_rlearner._ModelFinal or _drlearner._ModelFinal")
+                                          "_rlearner._ModelFinal")
         return self._ortho_learner_model_final.score(Y, T, nuisances=accumulated_nuisances,
                                                      **filter_none_kwargs(**score_kwargs))
 
