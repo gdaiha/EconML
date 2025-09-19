@@ -5,7 +5,7 @@ import pandas as pd
 import scipy.stats as st
 from copy import deepcopy
 from sklearn.model_selection import check_cv
-from sklearn.model_selection import cross_val_predict, StratifiedKFold, KFold
+from sklearn.model_selection import StratifiedKFold, KFold
 from statsmodels.api import WLS
 from statsmodels.tools import add_constant
 
@@ -14,7 +14,7 @@ from econml._cate_estimator import BaseCateEstimator
 
 from .results import CalibrationEvaluationResults, BLPEvaluationResults, UpliftEvaluationResults, EvaluationResults
 from .utils import calculate_dr_outcomes, calc_uplift
-from .weighted_utils import weighted_stat, weighted_se
+from .weighted_utils import weighted_stat, weighted_se, cross_val_predict_with_weights
 
 class DRTester:
     """
@@ -374,7 +374,12 @@ class DRTester:
             sampleweight = np.ones(X.shape[0])
 
         splits = self.get_cv_splits([X], D)
-        prop_preds = cross_val_predict(self.model_propensity, X, D, cv=splits, method='predict_proba')
+        prop_preds = cross_val_predict_with_weights(
+                    self.model_propensity,
+                    X, D,
+                    sample_weight=sampleweight,
+                    cv=splits,
+                    method="predict_proba")
 
         # Predict outcomes
         # T-learner logic
@@ -512,7 +517,10 @@ class DRTester:
             for i in range(n_groups):
 
                 # Assign units in validation set to groups
-                ind = (self.cate_preds_val_[:, k] >= cuts[i]) & (self.cate_preds_val_[:, k] <= cuts[i + 1])
+                if i < n_groups - 1:
+                    ind = (self.cate_preds_val_[:, k] >= cuts[i]) & (self.cate_preds_val_[:, k] < cuts[i + 1])
+                else:
+                    ind = (self.cate_preds_val_[:, k] >= cuts[i]) & (self.cate_preds_val_[:, k] <= cuts[i + 1])
 
                 # Skip if no units in group
                 if not np.any(ind):
@@ -676,13 +684,16 @@ class DRTester:
         if sampleweighttrain is None:
             sampleweighttrain = np.ones(self.cate_preds_train_.shape[0])
 
-        # Convert weights to integer values
-        sampleweightval = sampleweightval.astype(int)
-        sampleweighttrain = sampleweighttrain.astype(int)
+        assert np.min(sampleweightval) > 0, "Sample weights must be positive"
+        assert np.min(sampleweighttrain) > 0, "Sample weights must be positive"
+
+        # Convert weights to minimum value of 1
+        sampleweightval /= sampleweightval.min()
+        sampleweighttrain /= sampleweighttrain.min()
 
         # Check weights are valid
-        assert (np.all(sampleweightval >= 1)), "Sample weights must be integer and >= 1"
-        assert (np.all(sampleweighttrain >= 1)), "Sample weights must be integer and >= 1"
+        assert (np.all(sampleweightval >= 1)), "Sample weights must be >= 1"
+        assert (np.all(sampleweighttrain >= 1)), "Sample weights must be >= 1"
 
         curve_data_dict = dict()
         coeffs = []
@@ -702,7 +713,7 @@ class DRTester:
             errs.append(err)
             curve_data_dict[self.treatments[k + 1]] = curve_df
 
-        pvals = [st.norm.sf(abs(q / e)) for q, e in zip(coeffs, errs)]
+        pvals = [2*st.norm.sf(abs(q / e)) for q, e in zip(coeffs, errs)]
 
         self.uplift_res = UpliftEvaluationResults(
             params=coeffs,
